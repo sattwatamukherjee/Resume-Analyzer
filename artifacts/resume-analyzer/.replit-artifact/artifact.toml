@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "AI Resume Analyzer"
+description = "A full-stack AI web application where users upload their resume and paste a job description. The system analyzes the resume using AI, generates an explainable ATS compatibility score (0–100), identifies matched and missing skills/keywords, detects weak resume points, and provides personalized suggestions to improve the resume for that specific job. Users can save past analyses and track their improvement over time."
+version = "1.0.0"
+id = "artifacts/resume-analyzer"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18646
+
+[services.development]
+run = "pnpm --filter @workspace/resume-analyzer run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/resume-analyzer", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/resume-analyzer/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18646"
+BASE_PATH = "/"
