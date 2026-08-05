@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Resume Analyzer API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+  - name: analyses
+    description: Resume analysis operations
 paths:
   /healthz:
     get:
@@ -24,7 +28,288 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: iss
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the returnTo path on success.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+            default: /
+      responses:
+        '302':
+          description: Redirect to the OIDC provider logout URL.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileTokenExchangeRequest'
+      responses:
+        '200':
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Token did not contain usable claims.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Token exchange failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccess'
+
+  /analyses:
+    get:
+      tags: [analyses]
+      operationId: listAnalyses
+      summary: List the current user's past analyses
+      responses:
+        '200':
+          description: List of analyses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnalysisSummary'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      tags: [analyses]
+      operationId: createAnalysis
+      summary: Submit a resume and job description for AI analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRequest'
+      responses:
+        '201':
+          description: Analysis created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Analysis'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: AI analysis failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /analyses/stats:
+    get:
+      tags: [analyses]
+      operationId: getUserStats
+      summary: Get the current user's analysis statistics
+      responses:
+        '200':
+          description: User statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStats'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /analyses/{id}:
+    get:
+      tags: [analyses]
+      operationId: getAnalysis
+      summary: Get a specific analysis by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Analysis found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Analysis'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    delete:
+      tags: [analyses]
+      operationId: deleteAnalysis
+      summary: Delete an analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        '204':
+          description: Deleted successfully
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
 components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +319,208 @@ components:
       required:
         - status
 
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, 'null']
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    AnalysisRequest:
+      type: object
+      required: [resumeText, jobDescription]
+      properties:
+        resumeText:
+          type: string
+          minLength: 50
+          description: Full text content of the resume
+        jobDescription:
+          type: string
+          minLength: 50
+          description: Full text of the job description
+        fileName:
+          type: ["string", "null"]
+          description: Original filename of the uploaded resume
+
+    AnalysisSummary:
+      type: object
+      required: [id, atsScore, jobTitleGuess, fileName, createdAt]
+      properties:
+        id:
+          type: number
+        atsScore:
+          type: number
+        jobTitleGuess:
+          type: ["string", "null"]
+          description: AI-inferred job title from the job description
+        fileName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    SkillItem:
+      type: object
+      required: [skill, importance]
+      properties:
+        skill:
+          type: string
+        importance:
+          type: string
+          enum: [high, medium, low]
+        context:
+          type: ["string", "null"]
+
+    WeakPoint:
+      type: object
+      required: [section, issue, severity]
+      properties:
+        section:
+          type: string
+        issue:
+          type: string
+        severity:
+          type: string
+          enum: [critical, moderate, minor]
+
+    Suggestion:
+      type: object
+      required: [category, suggestion, impact]
+      properties:
+        category:
+          type: string
+        suggestion:
+          type: string
+        impact:
+          type: string
+          enum: [high, medium, low]
+        example:
+          type: ["string", "null"]
+
+    ScoreBreakdown:
+      type: object
+      required: [keywordMatch, formatScore, experienceRelevance, educationMatch]
+      properties:
+        keywordMatch:
+          type: number
+        formatScore:
+          type: number
+        experienceRelevance:
+          type: number
+        educationMatch:
+          type: number
+
+    Analysis:
+      type: object
+      required: [id, atsScore, matchedSkills, missingSkills, weakPoints, suggestions, jobTitleGuess, resumeStrengths, scoreBreakdown, fileName, createdAt]
+      properties:
+        id:
+          type: number
+        atsScore:
+          type: number
+        scoreBreakdown:
+          $ref: '#/components/schemas/ScoreBreakdown'
+        matchedSkills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillItem'
+        missingSkills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillItem'
+        weakPoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeakPoint'
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Suggestion'
+        jobTitleGuess:
+          type: ["string", "null"]
+        resumeStrengths:
+          type: array
+          items:
+            type: string
+        overallSummary:
+          type: ["string", "null"]
+        fileName:
+          type: ["string", "null"]
+        jobDescription:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    UserStats:
+      type: object
+      required: [totalAnalyses, averageScore, highestScore, lowestScore, topMissingSkills, recentAnalyses]
+      properties:
+        totalAnalyses:
+          type: number
+        averageScore:
+          type: number
+        highestScore:
+          type: number
+        lowestScore:
+          type: number
+        topMissingSkills:
+          type: array
+          items:
+            type: string
+        recentAnalyses:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisSummary'

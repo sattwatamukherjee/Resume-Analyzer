@@ -1,0 +1,1 @@
+- [Orval + Zod v4 compatibility](orval-zod-compat.md) — avoid format: email/uri and type: integer in OpenAPI spec; use type: number + plain strings instead
