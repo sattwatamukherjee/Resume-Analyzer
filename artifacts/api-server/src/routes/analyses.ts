@@ -27,6 +27,10 @@ router.post("/analyses", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Job description must be at least 50 characters." });
     return;
   }
+  if (fileName !== undefined && fileName !== null && typeof fileName !== "string") {
+    res.status(400).json({ error: "Invalid file name." });
+    return;
+  }
 
   try {
     const result = await analyzeResume(resumeText, jobDescription);
@@ -66,9 +70,8 @@ router.post("/analyses", async (req, res): Promise<void> => {
       createdAt: saved.createdAt.toISOString(),
     });
   } catch (err) {
-    req.log.error({ err }, "Failed to analyze resume");
-    const message = err instanceof Error ? err.message : "Analysis failed";
-    res.status(500).json({ error: message });
+    logger.error({ err }, "Failed to analyze resume");
+    res.status(500).json({ error: "Resume analysis failed. Please try again." });
   }
 });
 
@@ -81,59 +84,63 @@ router.get("/analyses/stats", async (req, res): Promise<void> => {
 
   const userId = req.user.id;
 
-  const [statsRow] = await db
-    .select({
-      totalAnalyses: count(analysesTable.id),
-      averageScore: avg(analysesTable.atsScore),
-      highestScore: max(analysesTable.atsScore),
-      lowestScore: min(analysesTable.atsScore),
-    })
-    .from(analysesTable)
-    .where(eq(analysesTable.userId, userId));
+  try {
+    const [statsRow] = await db
+      .select({
+        totalAnalyses: count(analysesTable.id),
+        averageScore: avg(analysesTable.atsScore),
+        highestScore: max(analysesTable.atsScore),
+        lowestScore: min(analysesTable.atsScore),
+      })
+      .from(analysesTable)
+      .where(eq(analysesTable.userId, userId));
 
-  const recentRows = await db
-    .select()
-    .from(analysesTable)
-    .where(eq(analysesTable.userId, userId))
-    .orderBy(desc(analysesTable.createdAt))
-    .limit(5);
+    const recentRows = await db
+      .select()
+      .from(analysesTable)
+      .where(eq(analysesTable.userId, userId))
+      .orderBy(desc(analysesTable.createdAt))
+      .limit(5);
 
-  // Aggregate top missing skills across all analyses
-  const allRows = await db
-    .select({ missingSkills: analysesTable.missingSkills })
-    .from(analysesTable)
-    .where(eq(analysesTable.userId, userId));
+    const allRows = await db
+      .select({ missingSkills: analysesTable.missingSkills })
+      .from(analysesTable)
+      .where(eq(analysesTable.userId, userId));
 
-  const skillCount: Record<string, number> = {};
-  for (const row of allRows) {
-    const skills = row.missingSkills as Array<{ skill: string }>;
-    if (Array.isArray(skills)) {
-      for (const s of skills) {
-        if (s.skill) {
-          skillCount[s.skill] = (skillCount[s.skill] ?? 0) + 1;
+    const skillCount: Record<string, number> = {};
+    for (const row of allRows) {
+      const skills = row.missingSkills as Array<{ skill: string }>;
+      if (Array.isArray(skills)) {
+        for (const s of skills) {
+          if (s.skill) {
+            skillCount[s.skill] = (skillCount[s.skill] ?? 0) + 1;
+          }
         }
       }
     }
-  }
-  const topMissingSkills = Object.entries(skillCount)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 8)
-    .map(([skill]) => skill);
+    const topMissingSkills = Object.entries(skillCount)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 8)
+      .map(([skill]) => skill);
 
-  res.json({
-    totalAnalyses: Number(statsRow?.totalAnalyses ?? 0),
-    averageScore: Math.round(Number(statsRow?.averageScore ?? 0)),
-    highestScore: Number(statsRow?.highestScore ?? 0),
-    lowestScore: Number(statsRow?.lowestScore ?? 0),
-    topMissingSkills,
-    recentAnalyses: recentRows.map((r) => ({
-      id: r.id,
-      atsScore: r.atsScore,
-      jobTitleGuess: r.jobTitleGuess,
-      fileName: r.fileName,
-      createdAt: r.createdAt.toISOString(),
-    })),
-  });
+    res.json({
+      totalAnalyses: Number(statsRow?.totalAnalyses ?? 0),
+      averageScore: Math.round(Number(statsRow?.averageScore ?? 0)),
+      highestScore: Number(statsRow?.highestScore ?? 0),
+      lowestScore: Number(statsRow?.lowestScore ?? 0),
+      topMissingSkills,
+      recentAnalyses: recentRows.map((r) => ({
+        id: r.id,
+        atsScore: r.atsScore,
+        jobTitleGuess: r.jobTitleGuess,
+        fileName: r.fileName,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "Failed to load analysis statistics");
+    res.status(500).json({ error: "Unable to load analysis statistics." });
+  }
 });
 
 // GET /analyses - list current user's analyses
@@ -143,21 +150,26 @@ router.get("/analyses", async (req, res): Promise<void> => {
     return;
   }
 
-  const rows = await db
-    .select()
-    .from(analysesTable)
-    .where(eq(analysesTable.userId, req.user.id))
-    .orderBy(desc(analysesTable.createdAt));
+  try {
+    const rows = await db
+      .select()
+      .from(analysesTable)
+      .where(eq(analysesTable.userId, req.user.id))
+      .orderBy(desc(analysesTable.createdAt));
 
-  res.json(
-    rows.map((r) => ({
-      id: r.id,
-      atsScore: r.atsScore,
-      jobTitleGuess: r.jobTitleGuess,
-      fileName: r.fileName,
-      createdAt: r.createdAt.toISOString(),
-    }))
-  );
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        atsScore: r.atsScore,
+        jobTitleGuess: r.jobTitleGuess,
+        fileName: r.fileName,
+        createdAt: r.createdAt.toISOString(),
+      }))
+    );
+  } catch (err) {
+    logger.error({ err }, "Failed to list analyses");
+    res.status(500).json({ error: "Unable to load analyses." });
+  }
 });
 
 // GET /analyses/:id - get a single analysis
@@ -174,31 +186,36 @@ router.get("/analyses/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [row] = await db
-    .select()
-    .from(analysesTable)
-    .where(and(eq(analysesTable.id, id), eq(analysesTable.userId, req.user.id)));
+  try {
+    const [row] = await db
+      .select()
+      .from(analysesTable)
+      .where(and(eq(analysesTable.id, id), eq(analysesTable.userId, req.user.id)));
 
-  if (!row) {
-    res.status(404).json({ error: "Analysis not found" });
-    return;
+    if (!row) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+
+    res.json({
+      id: row.id,
+      atsScore: row.atsScore,
+      scoreBreakdown: row.scoreBreakdown,
+      matchedSkills: row.matchedSkills,
+      missingSkills: row.missingSkills,
+      weakPoints: row.weakPoints,
+      suggestions: row.suggestions,
+      jobTitleGuess: row.jobTitleGuess,
+      resumeStrengths: row.resumeStrengths,
+      overallSummary: row.overallSummary,
+      fileName: row.fileName,
+      jobDescription: row.jobDescription,
+      createdAt: row.createdAt.toISOString(),
+    });
+  } catch (err) {
+    logger.error({ err }, "Failed to load analysis");
+    res.status(500).json({ error: "Unable to load analysis." });
   }
-
-  res.json({
-    id: row.id,
-    atsScore: row.atsScore,
-    scoreBreakdown: row.scoreBreakdown,
-    matchedSkills: row.matchedSkills,
-    missingSkills: row.missingSkills,
-    weakPoints: row.weakPoints,
-    suggestions: row.suggestions,
-    jobTitleGuess: row.jobTitleGuess,
-    resumeStrengths: row.resumeStrengths,
-    overallSummary: row.overallSummary,
-    fileName: row.fileName,
-    jobDescription: row.jobDescription,
-    createdAt: row.createdAt.toISOString(),
-  });
 });
 
 // DELETE /analyses/:id
@@ -215,17 +232,22 @@ router.delete("/analyses/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [deleted] = await db
-    .delete(analysesTable)
-    .where(and(eq(analysesTable.id, id), eq(analysesTable.userId, req.user.id)))
-    .returning();
+  try {
+    const [deleted] = await db
+      .delete(analysesTable)
+      .where(and(eq(analysesTable.id, id), eq(analysesTable.userId, req.user.id)))
+      .returning();
 
-  if (!deleted) {
-    res.status(404).json({ error: "Analysis not found" });
-    return;
+    if (!deleted) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+
+    res.sendStatus(204);
+  } catch (err) {
+    logger.error({ err }, "Failed to delete analysis");
+    res.status(500).json({ error: "Unable to delete analysis." });
   }
-
-  res.sendStatus(204);
 });
 
 export default router;
