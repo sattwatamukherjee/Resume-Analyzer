@@ -1,36 +1,33 @@
 import { Router, type IRouter } from "express";
 import { eq, and, desc, avg, max, min, count } from "drizzle-orm";
+import { z } from "zod";
 import { db, analysesTable } from "@workspace/db";
 import { analyzeResume } from "../lib/resumeAnalyzer";
 import { logger } from "../lib/logger";
+import { analysisRateLimit } from "../lib/rateLimit";
 
 const router: IRouter = Router();
 
+const createAnalysisSchema = z.object({
+  resumeText: z.string().trim().min(50).max(100_000),
+  jobDescription: z.string().trim().min(50).max(50_000),
+  fileName: z.string().trim().max(255).nullable().optional(),
+});
+
 // POST /analyses - create a new analysis
-router.post("/analyses", async (req, res): Promise<void> => {
+router.post("/analyses", analysisRateLimit, async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  const { resumeText, jobDescription, fileName } = req.body as {
-    resumeText?: string;
-    jobDescription?: string;
-    fileName?: string | null;
-  };
+  const validation = createAnalysisSchema.safeParse(req.body);
+  if (!validation.success) {
+    res.status(400).json({ error: "Invalid analysis request." });
+    return;
+  }
 
-  if (!resumeText || typeof resumeText !== "string" || resumeText.trim().length < 50) {
-    res.status(400).json({ error: "Resume text must be at least 50 characters." });
-    return;
-  }
-  if (!jobDescription || typeof jobDescription !== "string" || jobDescription.trim().length < 50) {
-    res.status(400).json({ error: "Job description must be at least 50 characters." });
-    return;
-  }
-  if (fileName !== undefined && fileName !== null && typeof fileName !== "string") {
-    res.status(400).json({ error: "Invalid file name." });
-    return;
-  }
+  const { resumeText, jobDescription, fileName } = validation.data;
 
   try {
     const result = await analyzeResume(resumeText, jobDescription);
