@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { openai } from "./openaiClient";
 import { logger } from "./logger";
 
@@ -38,6 +39,44 @@ export interface AnalysisResult {
   resumeStrengths: string[];
   overallSummary: string | null;
 }
+
+const skillItemSchema = z.object({
+  skill: z.string().min(1),
+  importance: z.enum(["high", "medium", "low"]),
+  context: z.string().nullable(),
+});
+
+const weakPointSchema = z.object({
+  section: z.string().min(1),
+  issue: z.string().min(1),
+  severity: z.enum(["critical", "moderate", "minor"]),
+});
+
+const suggestionSchema = z.object({
+  category: z.string().min(1),
+  suggestion: z.string().min(1),
+  impact: z.enum(["high", "medium", "low"]),
+  example: z.string().nullable(),
+});
+
+const scoreBreakdownSchema = z.object({
+  keywordMatch: z.number().int().min(0).max(100),
+  formatScore: z.number().int().min(0).max(100),
+  experienceRelevance: z.number().int().min(0).max(100),
+  educationMatch: z.number().int().min(0).max(100),
+});
+
+const analysisResultSchema = z.object({
+  atsScore: z.number().int().min(0).max(100),
+  scoreBreakdown: scoreBreakdownSchema,
+  matchedSkills: z.array(skillItemSchema),
+  missingSkills: z.array(skillItemSchema),
+  weakPoints: z.array(weakPointSchema),
+  suggestions: z.array(suggestionSchema),
+  jobTitleGuess: z.string().nullable(),
+  resumeStrengths: z.array(z.string()),
+  overallSummary: z.string().nullable(),
+});
 
 const SYSTEM_PROMPT = `You are an expert ATS (Applicant Tracking System) and resume analyst with 15+ years of experience in technical recruiting. Your job is to analyze a resume against a job description and provide detailed, actionable feedback.
 
@@ -118,27 +157,24 @@ export async function analyzeResume(
     throw new Error("OpenAI returned an empty response");
   }
 
-  let parsed: AnalysisResult;
+  let parsedJson: unknown;
   try {
-    parsed = JSON.parse(content) as AnalysisResult;
+    parsedJson = JSON.parse(content);
   } catch {
-    logger.error({ content }, "Failed to parse OpenAI JSON response");
+    logger.error("Failed to parse OpenAI JSON response");
     throw new Error("Failed to parse AI analysis response");
   }
 
-  // Validate and clamp score
-  parsed.atsScore = Math.max(0, Math.min(100, parsed.atsScore ?? 0));
-  parsed.scoreBreakdown = {
-    keywordMatch: Math.max(0, Math.min(100, parsed.scoreBreakdown?.keywordMatch ?? 0)),
-    formatScore: Math.max(0, Math.min(100, parsed.scoreBreakdown?.formatScore ?? 0)),
-    experienceRelevance: Math.max(0, Math.min(100, parsed.scoreBreakdown?.experienceRelevance ?? 0)),
-    educationMatch: Math.max(0, Math.min(100, parsed.scoreBreakdown?.educationMatch ?? 0)),
-  };
-  parsed.matchedSkills = parsed.matchedSkills ?? [];
-  parsed.missingSkills = parsed.missingSkills ?? [];
-  parsed.weakPoints = parsed.weakPoints ?? [];
-  parsed.suggestions = parsed.suggestions ?? [];
-  parsed.resumeStrengths = parsed.resumeStrengths ?? [];
+  const validation = analysisResultSchema.safeParse(parsedJson);
+  if (!validation.success) {
+    logger.error(
+      { issueCount: validation.error.issues.length },
+      "OpenAI response failed schema validation"
+    );
+    throw new Error("AI analysis response had an invalid structure");
+  }
+
+  const parsed = validation.data;
 
   logger.info({ score: parsed.atsScore }, "Resume analysis complete");
   return parsed;
